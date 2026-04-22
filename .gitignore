@@ -1,0 +1,93 @@
+# ============================================
+# automacao-juridica-trf1 — .gitignore
+# ============================================
+# Qualquer arquivo listado aqui nunca sera enviado para o GitHub.
+# Para confirmar que um arquivo esta ignorado: git check-ignore -v <caminho>
+
+# --------------------------------------------
+# Segredos — NUNCA commitar
+# --------------------------------------------
+.env
+*.env.local
+*.env.production
+
+# --------------------------------------------
+# Ambiente Python — regenerado por instalar.bat
+# --------------------------------------------
+.venv/
+venv/
+env/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# --------------------------------------------
+# Metadados de sistema operacional
+# --------------------------------------------
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# --------------------------------------------
+# IDE e editores
+# --------------------------------------------
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# --------------------------------------------
+# Dados do escritorio — NUNCA commitar
+# --------------------------------------------
+# CNPJs reais sao dados de cliente.
+data/entrada/cnpjs.csv
+
+# Arquivos de trabalho do operador (crescem via self-learning).
+# Versoes _default.csv SAO commitadas como referencia inicial.
+data/entrada/mapeamento_tipo_servico.csv
+data/entrada/mapeamento_tipo_servico_ATIVO.csv
+data/entrada/lista_servicos.csv
+
+# --------------------------------------------
+# Saidas de runtime — geradas pelo sistema
+# --------------------------------------------
+data/saida/registro_de_downloads.csv
+data/saida/auditoria.log
+data/saida/.downloading_*
+data/saida/download_log_*.txt
+data/saida/relatorio_de_oportunidades_*.xlsx
+data/saida/*.csv
+
+# --------------------------------------------
+# Dados pesados — documentos baixados, cache, navegador
+# --------------------------------------------
+data/documentos/
+data/embeddings/
+data/navegador/
+
+# --------------------------------------------
+# Runner gerado em runtime por _start_download
+# --------------------------------------------
+scripts/_run_download.py
+
+# --------------------------------------------
+# Backups locais
+# --------------------------------------------
+*.zip
+*.bak
+*.backup
+
+# --------------------------------------------
+# NAO ignorar (forcar commit mesmo se padrao acima casar)
+# --------------------------------------------
+!data/entrada/cnpjs.csv.example
+!data/entrada/mapeamento_tipo_servico_default.csv
+!data/entrada/lista_servicos_default.csv
+!.env.example

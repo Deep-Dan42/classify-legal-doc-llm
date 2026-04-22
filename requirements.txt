@@ -1,0 +1,11 @@
+streamlit>=1.30
+openpyxl>=3.1
+openai>=1.0
+pydantic>=2.0
+python-dotenv>=1.0
+pdfplumber>=0.9
+PyMuPDF>=1.23
+undetected-chromedriver>=3.5
+selenium>=4.15
+setuptools
+numpy>=1.24
