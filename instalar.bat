@@ -18,6 +18,16 @@ set "REPO_URL=https://github.com/Deep-Dan42/classify-legal-doc-llm.git"
 set "INSTALL_DIR=%USERPROFILE%\Documents\classify-legal-doc-llm"
 set "SHORTCUT_NAME=Consulta TRF1"
 
+REM ============================================================
+REM  TOKEN DE ACESSO — COLE SUA PAT ENTRE AS ASPAS ABAIXO
+REM  Token fine-grained, read-only, expira em 1 ano.
+REM  Gere em: https://github.com/settings/personal-access-tokens
+REM ============================================================
+set "GH_TOKEN=COLE_SEU_TOKEN_AQUI"
+
+REM URL autenticada para clone (monta a partir de REPO_URL + token)
+set "REPO_URL_AUTH=https://%GH_TOKEN%@github.com/Deep-Dan42/classify-legal-doc-llm.git"
+
 echo.
 echo ============================================================
 echo   CONSULTA TRF1 - INSTALADOR
@@ -35,6 +45,20 @@ echo.
 echo   Local da instalacao: %INSTALL_DIR%
 echo.
 pause
+
+REM ============================================================
+REM  VALIDACAO DO TOKEN
+REM ============================================================
+if "%GH_TOKEN%"=="COLE_SEU_TOKEN_AQUI" (
+    echo.
+    echo ERRO: Token de acesso nao foi configurado neste instalador.
+    echo.
+    echo O desenvolvedor precisa preencher o GH_TOKEN antes de distribuir
+    echo este arquivo. Entre em contato com o desenvolvedor.
+    echo.
+    pause
+    exit /b 1
+)
 
 REM ============================================================
 REM  DETECCAO DE REINSTALACAO
@@ -105,14 +129,18 @@ if errorlevel 1 (
     set "GIT_INSTALLER=%TEMP%\Git-Installer.exe"
     set "GIT_URL=https://github.com/git-for-windows/git/releases/download/v2.47.1.windows.1/Git-2.47.1-64-bit.exe"
 
-    powershell -Command "try { Invoke-WebRequest -Uri '!GIT_URL!' -OutFile '!GIT_INSTALLER!' -UseBasicParsing } catch { exit 1 }"
+    REM Usar curl.exe (nativo no Windows 10+) em vez de PowerShell
+    REM para evitar problemas com politicas de execucao e perfis do PowerShell.
+    curl.exe -L --silent --show-error --fail --output "!GIT_INSTALLER!" "!GIT_URL!"
     if errorlevel 1 (
         call :GIT_INSTALL_FAILED
         exit /b 1
     )
 
-    echo   Instalando Git silenciosamente...
-    "!GIT_INSTALLER!" /VERYSILENT /NORESTART /NOCANCEL /SP- /COMPONENTS="icons,ext\reg\shellhere,assoc,assoc_sh"
+    echo   Instalando Git silenciosamente (pode levar 1-2 minutos)...
+    REM Flags silenciosas completas para o instalador do Git for Windows.
+    REM /VERYSILENT suprime todas as janelas; /SUPPRESSMSGBOXES suprime diálogos de erro.
+    "!GIT_INSTALLER!" /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /NOCANCEL /SP- /COMPONENTS="icons,ext\reg\shellhere,assoc,assoc_sh"
     if errorlevel 1 (
         call :GIT_INSTALL_FAILED
         exit /b 1
@@ -139,22 +167,34 @@ echo.
 echo [3/7] Baixando sistema...
 
 if "%MODE%"=="fresh" (
-    REM Clone inicial
+    REM Clone inicial com token embutido na URL (bypassa Credential Manager).
+    REM credential.helper= vazio desabilita qualquer helper global para este clone.
     if not exist "%USERPROFILE%\Documents" mkdir "%USERPROFILE%\Documents"
     cd /d "%USERPROFILE%\Documents"
-    git clone "%REPO_URL%" "classify-legal-doc-llm"
+    git -c credential.helper= clone "%REPO_URL_AUTH%" "classify-legal-doc-llm"
     if errorlevel 1 (
         echo.
         echo ERRO: Falha ao clonar repositorio.
-        echo Verifique sua conexao com a internet e tente novamente.
+        echo.
+        echo Possiveis causas:
+        echo   - Sem conexao com a internet
+        echo   - Token de acesso invalido ou expirado
+        echo   - Token sem permissao de leitura no repositorio
         echo.
         pause
         exit /b 1
     )
+
+    REM Configurar o repositorio clonado para usar o token em pulls futuros.
+    cd /d "%INSTALL_DIR%"
+    git remote set-url origin "%REPO_URL_AUTH%"
+
     echo   Repositorio clonado. OK.
 ) else (
     REM Atualizar (tanto repair quanto update fazem pull)
     cd /d "%INSTALL_DIR%"
+    REM Garantir que a URL esta com o token atualizado
+    git remote set-url origin "%REPO_URL_AUTH%"
     git pull
     if errorlevel 1 (
         echo.
@@ -230,9 +270,11 @@ if exist ".env" (
         echo.
         echo AVISO: Chave nao informada. Voce podera adicionar depois editando .env
     ) else (
-        REM Passa a chave via variavel de ambiente para evitar problemas de escape
+        REM Passa a chave via variavel de ambiente para evitar problemas de escape.
+        REM -NoProfile evita carregar profile.ps1 (pode estar bloqueado por policy).
+        REM -ExecutionPolicy Bypass ignora a politica de execucao de scripts deste PC.
         set "OPENAI_KEY_TEMP=!OPENAI_KEY!"
-        powershell -Command "$k = $env:OPENAI_KEY_TEMP; (Get-Content '.env') -replace '^OPENAI_API_KEY=.*', ('OPENAI_API_KEY=' + $k) | Set-Content '.env' -Encoding UTF8"
+        powershell -NoProfile -ExecutionPolicy Bypass -Command "$k = $env:OPENAI_KEY_TEMP; (Get-Content '.env') -replace '^OPENAI_API_KEY=.*', ('OPENAI_API_KEY=' + $k) | Set-Content '.env' -Encoding UTF8"
         set "OPENAI_KEY_TEMP="
         echo   Chave salva em .env. OK.
     )
@@ -282,10 +324,10 @@ echo [7/7] Criando atalhos no Desktop...
 set "DESKTOP=%USERPROFILE%\Desktop"
 
 REM Atalho principal: Consulta TRF1 (roda iniciar_servidor.bat)
-powershell -Command "$WshShell = New-Object -ComObject WScript.Shell; $Shortcut = $WshShell.CreateShortcut('%DESKTOP%\%SHORTCUT_NAME%.lnk'); $Shortcut.TargetPath = '%INSTALL_DIR%\iniciar_servidor.bat'; $Shortcut.WorkingDirectory = '%INSTALL_DIR%'; $Shortcut.IconLocation = '%SystemRoot%\System32\shell32.dll,13'; $Shortcut.Description = 'Iniciar Consulta TRF1'; $Shortcut.Save()"
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$WshShell = New-Object -ComObject WScript.Shell; $Shortcut = $WshShell.CreateShortcut('%DESKTOP%\%SHORTCUT_NAME%.lnk'); $Shortcut.TargetPath = '%INSTALL_DIR%\iniciar_servidor.bat'; $Shortcut.WorkingDirectory = '%INSTALL_DIR%'; $Shortcut.IconLocation = '%SystemRoot%\System32\shell32.dll,13'; $Shortcut.Description = 'Iniciar Consulta TRF1'; $Shortcut.Save()"
 
 REM Atalho de atualizacao: Atualizar Consulta TRF1
-powershell -Command "$WshShell = New-Object -ComObject WScript.Shell; $Shortcut = $WshShell.CreateShortcut('%DESKTOP%\Atualizar Consulta TRF1.lnk'); $Shortcut.TargetPath = '%INSTALL_DIR%\atualizar.bat'; $Shortcut.WorkingDirectory = '%INSTALL_DIR%'; $Shortcut.IconLocation = '%SystemRoot%\System32\shell32.dll,238'; $Shortcut.Description = 'Atualizar Consulta TRF1'; $Shortcut.Save()"
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$WshShell = New-Object -ComObject WScript.Shell; $Shortcut = $WshShell.CreateShortcut('%DESKTOP%\Atualizar Consulta TRF1.lnk'); $Shortcut.TargetPath = '%INSTALL_DIR%\atualizar.bat'; $Shortcut.WorkingDirectory = '%INSTALL_DIR%'; $Shortcut.IconLocation = '%SystemRoot%\System32\shell32.dll,238'; $Shortcut.Description = 'Atualizar Consulta TRF1'; $Shortcut.Save()"
 
 echo   Atalhos criados no Desktop. OK.
 
