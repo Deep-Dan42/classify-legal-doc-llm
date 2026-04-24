@@ -327,6 +327,7 @@ def _init():
         "oportunidades": [], "dados_empresa": {}, "stats": {},
         "regras_sugeridas": [], "revisao_concluida": False, "motor": None,
         "download_proc": None, "download_cnpj": "",
+        "cnpj_prefill": "",
     }.items():
         if k not in st.session_state:
             st.session_state[k] = v
@@ -410,6 +411,49 @@ def _fmt(d):
 def _has_pdfs(cnpj):
     p = settings.DATA_DOCUMENTOS_DIR / cnpj
     return p.exists() and any(p.glob("*.pdf"))
+
+
+def _listar_cnpjs_baixados(limite=8):
+    """Lista CNPJs com documentos baixados, ordenados por modificação mais recente.
+
+    Returns: lista de dicts [{"cnpj": str, "n_docs": int, "empresa": str}, ...]
+    limitada aos `limite` mais recentes.
+    """
+    base = settings.DATA_DOCUMENTOS_DIR
+    if not base.exists():
+        return []
+
+    entradas = []
+    for sub in base.iterdir():
+        if not sub.is_dir():
+            continue
+        cnpj = sub.name
+        # CNPJ deve ter 14 dígitos
+        if not (cnpj.isdigit() and len(cnpj) == 14):
+            continue
+        pdfs = list(sub.glob("*.pdf"))
+        if not pdfs:
+            continue
+        # Nome da empresa se disponível
+        empresa = ""
+        empresa_json = sub / "empresa.json"
+        if empresa_json.exists():
+            try:
+                import json
+                emp = json.loads(empresa_json.read_text(encoding="utf-8"))
+                empresa = emp.get("empresa", "")
+            except Exception:
+                pass
+        entradas.append({
+            "cnpj": cnpj,
+            "n_docs": len(pdfs),
+            "empresa": empresa,
+            "mtime": sub.stat().st_mtime,
+        })
+
+    entradas.sort(key=lambda x: x["mtime"], reverse=True)
+    return entradas[:limite]
+
 
 def _disk_usage(cnpj):
     p = settings.DATA_DOCUMENTOS_DIR / cnpj
@@ -752,7 +796,17 @@ def pg_nova_consulta():
     st.markdown('<p class="page-title">Nova Consulta</p>', unsafe_allow_html=True)
     st.markdown('<p class="page-sub">Insira o CNPJ para gerar o relatório de oportunidades tributárias.</p>', unsafe_allow_html=True)
 
-    cnpj = st.text_input("CNPJ", placeholder="00.000.000/0000-00", label_visibility="collapsed")
+    # Se o usuário clicou em "Usar" em um CNPJ da lista abaixo, o handler setou
+    # cnpj_prefill. Aqui propagamos o valor para a chave do proprio widget ANTES
+    # dele ser instanciado — padrao canonico do Streamlit para preencher widgets
+    # programaticamente. Tentar passar value=prefill com key= na mesma chamada
+    # NAO funciona: Streamlit prioriza session_state cacheado sobre o value=.
+    if st.session_state.get("cnpj_prefill"):
+        st.session_state["cnpj_input"] = st.session_state["cnpj_prefill"]
+        st.session_state["cnpj_prefill"] = ""
+
+    cnpj = st.text_input("CNPJ", placeholder="00.000.000/0000-00",
+                         label_visibility="collapsed", key="cnpj_input")
     cl = "".join(c for c in cnpj if c.isdigit())
 
     if cl and len(cl) == 14:
@@ -793,15 +847,25 @@ def pg_nova_consulta():
             <p style="color:#777;font-size:13px;margin:0;">{d.get('n_identificados',0)} serviços · {d.get('n_oportunidades',0)} oportunidades · {d.get('n_revisao',0)} pendentes</p>
         </div>""", unsafe_allow_html=True)
 
-    # Manutenção
-    with st.expander("Manutenção do sistema"):
-        st.markdown("**Limpar duplicatas** — Remove entradas duplicadas do registro de downloads.")
-        if st.button("Limpar duplicatas do registro"):
-            antes, depois = _limpar_registro_csv()
-            if antes == depois:
-                st.info(f"Nenhuma duplicata encontrada ({depois} registros).")
-            else:
-                st.success(f"Removidas {antes - depois} duplicatas. Registro: {antes} → {depois} registros.")
+    # Lista de CNPJs com documentos já baixados — facilita copiar/colar.
+    baixados = _listar_cnpjs_baixados(limite=8)
+    if baixados:
+        st.markdown("<br>", unsafe_allow_html=True)
+        st.markdown('<p class="overline">CNPJs com Documentos Disponíveis</p>', unsafe_allow_html=True)
+        st.markdown('<p class="page-sub" style="margin-bottom:12px;">Clique em qualquer item para preencher o campo acima.</p>', unsafe_allow_html=True)
+        for entrada in baixados:
+            c1, c2 = st.columns([5, 1])
+            with c1:
+                nome = entrada["empresa"] if entrada["empresa"] else "Empresa não identificada"
+                st.markdown(f"""<div class="card" style="margin-bottom:8px;">
+                    <p style="color:var(--on-surface);font-size:15px;font-family:Manrope,sans-serif;font-weight:500;margin:0 0 4px;">{nome}</p>
+                    <p style="color:var(--primary);font-size:13px;margin:0 0 2px;">{_fmt(entrada['cnpj'])}</p>
+                    <p style="color:#777;font-size:12px;margin:0;">{entrada['n_docs']} documentos baixados</p>
+                </div>""", unsafe_allow_html=True)
+            with c2:
+                if st.button("Usar", key=f"usar_{entrada['cnpj']}", use_container_width=True):
+                    st.session_state.cnpj_prefill = entrada["cnpj"]
+                    st.rerun()
 
 
 # ============================================
@@ -997,6 +1061,10 @@ def pg_resultados():
     st.markdown("<br>", unsafe_allow_html=True)
     st.markdown("#### Serviços Identificados")
 
+    # Lista de teses (para o dropdown de correcao) — carregada uma vez por render.
+    from core.input_loader import carregar_lista_servicos, nomes_teses as gn
+    _opts_corr = ["(manter classificação atual)"] + sorted(gn(carregar_lista_servicos()))
+
     for item in st.session_state.servicos_identificados:
         pill = _pill(item.confianca)
         with st.expander(f"{item.numero_processo} · {item.tipo_documento} · {item.tipo_de_servico} · {item.confianca}"):
@@ -1014,6 +1082,57 @@ def pg_resultados():
             if item.observacao:
                 st.markdown("**Análise do sistema:**")
                 st.markdown(f'<div class="sug-box">{item.observacao}</div>', unsafe_allow_html=True)
+
+            # Correcao manual da classificacao (Change 3)
+            # UID estavel baseado no conteudo — evita colisao entre linhas.
+            _corr_uid = abs(hash(f"{item.numero_processo}|{item.tipo_documento}|{(item.trecho_extraido or '')[:80]}"))
+            st.markdown("<br>", unsafe_allow_html=True)
+            st.markdown('<p class="overline">Corrigir classificação</p>', unsafe_allow_html=True)
+            st.markdown('<p style="color:#777;font-size:12px;margin:0 0 8px;">Se a classificação acima estiver incorreta, cole a parte relevante do texto, selecione o serviço correto e clique em Corrigir. A correção também gera uma regra sugerida na página Revisão.</p>', unsafe_allow_html=True)
+
+            rel_corr = st.text_area("Parte Relevante",
+                                    key=f"corr_rel_{_corr_uid}",
+                                    height=80,
+                                    placeholder="Cole as 2-3 linhas do trecho extraído que definem o serviço...",
+                                    label_visibility="collapsed")
+
+            cc1, cc2 = st.columns([3, 1])
+            with cc1:
+                nova_tese = st.selectbox("Serviço correto", _opts_corr,
+                                         key=f"corr_svc_{_corr_uid}",
+                                         label_visibility="collapsed")
+            with cc2:
+                corrigir = st.button("Corrigir", key=f"corr_btn_{_corr_uid}", use_container_width=True)
+
+            if corrigir:
+                if nova_tese == "(manter classificação atual)":
+                    st.warning("Selecione um serviço da lista antes de clicar em Corrigir.")
+                elif nova_tese == item.tipo_de_servico:
+                    st.info("A classificação selecionada é a mesma que já está registrada.")
+                elif not rel_corr.strip():
+                    st.warning("Cole a parte relevante do texto para gerar a regra sugerida.")
+                else:
+                    antigo = item.tipo_de_servico
+                    item.tipo_de_servico = nova_tese
+                    item.confianca = "Confirmado"
+                    item.metodo = "CORRECAO_MANUAL"
+
+                    # Extrai keywords da parte relevante para gerar regra sugerida
+                    # (mesmo fluxo da pagina Revisao).
+                    from classificacao.regras import _extrair_keywords
+                    kws = _extrair_keywords(rel_corr.strip())
+                    kw_str = " ".join(kws)
+
+                    st.session_state.regras_sugeridas.append({
+                        "palavras": kw_str,
+                        "tipo": nova_tese,
+                        "processo": item.numero_processo,
+                        "origem": "correcao_resultados",
+                        "texto_original": rel_corr.strip(),
+                    })
+                    _recalc_gap()
+                    st.toast(f"Classificação corrigida ('{antigo}' → '{nova_tese}'). Aprove a nova regra na página Revisão.")
+                    st.rerun()
 
 
 # ============================================
@@ -1044,8 +1163,11 @@ def pg_revisao():
         opts = ["(Selecionar tipo de serviço)"] + sorted(gn(carregar_lista_servicos())) + ["Não é uma tese (ignorar)"]
 
         for idx, item in enumerate(tri):
-            # Use process number in keys for fresh state after pop
-            uid = f"{item.numero_processo}_{item.tipo_documento}_{idx}"
+            # UID estavel baseado em hash do conteudo — imune a pop/shift do indice.
+            # Bug anterior: usar idx posicional fazia Streamlit reutilizar estado
+            # cacheado do item anterior apos pop, causando texto "fantasma".
+            _uid_str = f"{item.numero_processo}|{item.tipo_documento}|{(item.trecho_extraido or '')[:80]}"
+            uid = abs(hash(_uid_str))
 
             st.markdown(f"""<div class="rev-card">
                 <span class="p-rev">Item {idx+1} de {len(tri)}</span>
@@ -1082,11 +1204,13 @@ def pg_revisao():
                 if escolha == "(Selecionar tipo de serviço)":
                     st.warning("Selecione um tipo de serviço.")
                 elif escolha == "Não é uma tese (ignorar)":
+                    # "Ignorar" só afeta o documento atual (nao propaga para o processo)
                     st.session_state.triagem_pendente.pop(idx)
                     _recalc_gap()
                     st.rerun()
                 else:
-                    # If parte relevante provided, extract keywords and suggest rule
+                    # Se parte relevante foi fornecida, extrai keywords e sugere regra
+                    # (apenas uma vez, a partir do documento efetivamente classificado).
                     if rel.strip():
                         from classificacao.regras import _extrair_keywords
                         kws = _extrair_keywords(rel.strip())
@@ -1099,10 +1223,25 @@ def pg_revisao():
                             "texto_original": rel.strip(),
                         })
                         st.toast(f"Regra sugerida adicionada. Aprove na aba 'Regras Sugeridas'.")
-                    item.tipo_de_servico = escolha
-                    item.confianca = "Confirmado"
-                    item.metodo = "REVISAO_MANUAL"
-                    st.session_state.triagem_pendente.pop(idx)
+
+                    # Propagacao no nivel do processo (Change 5):
+                    # Todos os documentos do mesmo processo recebem a mesma classificacao
+                    # e sao removidos da fila de revisao em uma unica operacao.
+                    proc_alvo = item.numero_processo
+                    n_afetados = 0
+                    for it in st.session_state.triagem_pendente:
+                        if it.numero_processo == proc_alvo:
+                            it.tipo_de_servico = escolha
+                            it.confianca = "Confirmado"
+                            it.metodo = "REVISAO_MANUAL"
+                            n_afetados += 1
+                    # Filtra (remove todos os documentos deste processo)
+                    st.session_state.triagem_pendente = [
+                        it for it in st.session_state.triagem_pendente
+                        if it.numero_processo != proc_alvo
+                    ]
+                    if n_afetados > 1:
+                        st.toast(f"{n_afetados} documentos deste processo foram classificados.")
                     _recalc_gap()
                     st.rerun()
 
@@ -1116,19 +1255,33 @@ def pg_revisao():
             st.markdown('<p class="overline">Regras Sugeridas</p>', unsafe_allow_html=True)
             st.markdown('<p class="page-sub">Regras detectadas pelo LLM ou extraídas da revisão manual. Aprove para adicionar ao classificador determinístico.</p>', unsafe_allow_html=True)
             for i, s in enumerate(st.session_state.regras_sugeridas):
-                origem = "Revisão Manual" if s.get("origem") == "revisao_manual" else "LLM"
-                with st.expander(f"[{origem}] '{s['palavras']}' → {s['tipo']}"):
-                    st.markdown(f"**Keywords:** {s['palavras']}")
+                origem_raw = s.get("origem", "")
+                if origem_raw == "revisao_manual":
+                    origem = "Revisão Manual"
+                elif origem_raw == "correcao_resultados":
+                    origem = "Correção em Resultados"
+                else:
+                    origem = "LLM"
+                titulo = f"[{origem}] '{s['palavras']}' → {s['tipo']}" if s['palavras'] else f"[{origem}] → {s['tipo']}"
+                with st.expander(titulo):
+                    if s['palavras']:
+                        st.markdown(f"**Keywords:** {s['palavras']}")
                     st.markdown(f"**Serviço:** {s['tipo']}")
                     st.markdown(f"**Processo:** {s['processo']}")
                     if s.get("texto_original"):
                         st.markdown(f"**Parte relevante original:**")
                         st.markdown(f'<div class="sug-box">{s["texto_original"]}</div>', unsafe_allow_html=True)
-                    if st.button("Aprovar Regra", key=f"ap_{i}"):
-                        csv_a = settings.DATA_ENTRADA_DIR / "mapeamento_tipo_servico_ATIVO.csv"
-                        from classificacao.motor import _append_regra_csv
-                        ok = _append_regra_csv(s["palavras"], s["tipo"], csv_a)
-                        st.toast("Regra aprovada e salva!" if ok else "Regra já existe.")
+                    # Botao "Aprovar" so aparece quando ha palavras-chave para salvar na CSV.
+                    # Entradas de "Correcao em Resultados" sem palavras sao informativas
+                    # (registram que a classificacao foi corrigida manualmente).
+                    if s['palavras']:
+                        if st.button("Aprovar Regra", key=f"ap_{i}"):
+                            csv_a = settings.DATA_ENTRADA_DIR / "mapeamento_tipo_servico_ATIVO.csv"
+                            from classificacao.motor import _append_regra_csv
+                            ok = _append_regra_csv(s["palavras"], s["tipo"], csv_a)
+                            st.toast("Regra aprovada e salva!" if ok else "Regra já existe.")
+                    else:
+                        st.info("Este registro é informativo (correção manual sem palavras-chave). Sem regra determinística para aprovar.")
         else:
             st.info("Nenhuma regra sugerida ainda. Classifique itens na aba Revisão ou execute uma consulta.")
 
