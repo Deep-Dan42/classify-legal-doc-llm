@@ -105,18 +105,14 @@ if errorlevel 1 (
     set "GIT_INSTALLER=%TEMP%\Git-Installer.exe"
     set "GIT_URL=https://github.com/git-for-windows/git/releases/download/v2.47.1.windows.1/Git-2.47.1-64-bit.exe"
 
-    REM Usar curl.exe (nativo no Windows 10+) em vez de PowerShell
-    REM para evitar problemas com politicas de execucao e perfis do PowerShell.
-    curl.exe -L --silent --show-error --fail --output "!GIT_INSTALLER!" "!GIT_URL!"
+    powershell -Command "try { Invoke-WebRequest -Uri '!GIT_URL!' -OutFile '!GIT_INSTALLER!' -UseBasicParsing } catch { exit 1 }"
     if errorlevel 1 (
         call :GIT_INSTALL_FAILED
         exit /b 1
     )
 
-    echo   Instalando Git silenciosamente (pode levar 1-2 minutos)...
-    REM Flags silenciosas completas para o instalador do Git for Windows.
-    REM /VERYSILENT suprime todas as janelas; /SUPPRESSMSGBOXES suprime diálogos de erro.
-    "!GIT_INSTALLER!" /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /NOCANCEL /SP- /COMPONENTS="icons,ext\reg\shellhere,assoc,assoc_sh"
+    echo   Instalando Git silenciosamente...
+    "!GIT_INSTALLER!" /VERYSILENT /NORESTART /NOCANCEL /SP- /COMPONENTS="icons,ext\reg\shellhere,assoc,assoc_sh"
     if errorlevel 1 (
         call :GIT_INSTALL_FAILED
         exit /b 1
@@ -143,7 +139,7 @@ echo.
 echo [3/7] Baixando sistema...
 
 if "%MODE%"=="fresh" (
-    REM Clone inicial (repo publico, sem token)
+    REM Clone inicial
     if not exist "%USERPROFILE%\Documents" mkdir "%USERPROFILE%\Documents"
     cd /d "%USERPROFILE%\Documents"
     git clone "%REPO_URL%" "classify-legal-doc-llm"
@@ -234,11 +230,9 @@ if exist ".env" (
         echo.
         echo AVISO: Chave nao informada. Voce podera adicionar depois editando .env
     ) else (
-        REM Passa a chave via variavel de ambiente para evitar problemas de escape.
-        REM -NoProfile evita carregar profile.ps1 (pode estar bloqueado por policy).
-        REM -ExecutionPolicy Bypass ignora a politica de execucao de scripts deste PC.
+        REM Passa a chave via variavel de ambiente para evitar problemas de escape
         set "OPENAI_KEY_TEMP=!OPENAI_KEY!"
-        powershell -NoProfile -ExecutionPolicy Bypass -Command "$k = $env:OPENAI_KEY_TEMP; (Get-Content '.env') -replace '^OPENAI_API_KEY=.*', ('OPENAI_API_KEY=' + $k) | Set-Content '.env' -Encoding UTF8"
+        powershell -Command "$k = $env:OPENAI_KEY_TEMP; (Get-Content '.env') -replace '^OPENAI_API_KEY=.*', ('OPENAI_API_KEY=' + $k) | Set-Content '.env' -Encoding UTF8"
         set "OPENAI_KEY_TEMP="
         echo   Chave salva em .env. OK.
     )
@@ -288,10 +282,10 @@ echo [7/7] Criando atalhos no Desktop...
 set "DESKTOP=%USERPROFILE%\Desktop"
 
 REM Atalho principal: Consulta TRF1 (roda iniciar_servidor.bat)
-powershell -NoProfile -ExecutionPolicy Bypass -Command "$WshShell = New-Object -ComObject WScript.Shell; $Shortcut = $WshShell.CreateShortcut('%DESKTOP%\%SHORTCUT_NAME%.lnk'); $Shortcut.TargetPath = '%INSTALL_DIR%\iniciar_servidor.bat'; $Shortcut.WorkingDirectory = '%INSTALL_DIR%'; $Shortcut.IconLocation = '%SystemRoot%\System32\shell32.dll,13'; $Shortcut.Description = 'Iniciar Consulta TRF1'; $Shortcut.Save()"
+powershell -Command "$WshShell = New-Object -ComObject WScript.Shell; $Shortcut = $WshShell.CreateShortcut('%DESKTOP%\%SHORTCUT_NAME%.lnk'); $Shortcut.TargetPath = '%INSTALL_DIR%\iniciar_servidor.bat'; $Shortcut.WorkingDirectory = '%INSTALL_DIR%'; $Shortcut.IconLocation = '%SystemRoot%\System32\shell32.dll,13'; $Shortcut.Description = 'Iniciar Consulta TRF1'; $Shortcut.Save()"
 
 REM Atalho de atualizacao: Atualizar Consulta TRF1
-powershell -NoProfile -ExecutionPolicy Bypass -Command "$WshShell = New-Object -ComObject WScript.Shell; $Shortcut = $WshShell.CreateShortcut('%DESKTOP%\Atualizar Consulta TRF1.lnk'); $Shortcut.TargetPath = '%INSTALL_DIR%\atualizar.bat'; $Shortcut.WorkingDirectory = '%INSTALL_DIR%'; $Shortcut.IconLocation = '%SystemRoot%\System32\shell32.dll,238'; $Shortcut.Description = 'Atualizar Consulta TRF1'; $Shortcut.Save()"
+powershell -Command "$WshShell = New-Object -ComObject WScript.Shell; $Shortcut = $WshShell.CreateShortcut('%DESKTOP%\Atualizar Consulta TRF1.lnk'); $Shortcut.TargetPath = '%INSTALL_DIR%\atualizar.bat'; $Shortcut.WorkingDirectory = '%INSTALL_DIR%'; $Shortcut.IconLocation = '%SystemRoot%\System32\shell32.dll,238'; $Shortcut.Description = 'Atualizar Consulta TRF1'; $Shortcut.Save()"
 
 echo   Atalhos criados no Desktop. OK.
 
