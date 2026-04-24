@@ -18,16 +18,6 @@ set "REPO_URL=https://github.com/Deep-Dan42/classify-legal-doc-llm.git"
 set "INSTALL_DIR=%USERPROFILE%\Documents\classify-legal-doc-llm"
 set "SHORTCUT_NAME=Consulta TRF1"
 
-REM ============================================================
-REM  TOKEN DE ACESSO — COLE SUA PAT ENTRE AS ASPAS ABAIXO
-REM  Token fine-grained, read-only, expira em 1 ano.
-REM  Gere em: https://github.com/settings/personal-access-tokens
-REM ============================================================
-set "GH_TOKEN=COLE_SEU_TOKEN_AQUI"
-
-REM URL autenticada para clone (monta a partir de REPO_URL + token)
-set "REPO_URL_AUTH=https://%GH_TOKEN%@github.com/Deep-Dan42/classify-legal-doc-llm.git"
-
 echo.
 echo ============================================================
 echo   CONSULTA TRF1 - INSTALADOR
@@ -45,20 +35,6 @@ echo.
 echo   Local da instalacao: %INSTALL_DIR%
 echo.
 pause
-
-REM ============================================================
-REM  VALIDACAO DO TOKEN
-REM ============================================================
-if "%GH_TOKEN%"=="COLE_SEU_TOKEN_AQUI" (
-    echo.
-    echo ERRO: Token de acesso nao foi configurado neste instalador.
-    echo.
-    echo O desenvolvedor precisa preencher o GH_TOKEN antes de distribuir
-    echo este arquivo. Entre em contato com o desenvolvedor.
-    echo.
-    pause
-    exit /b 1
-)
 
 REM ============================================================
 REM  DETECCAO DE REINSTALACAO
@@ -167,34 +143,22 @@ echo.
 echo [3/7] Baixando sistema...
 
 if "%MODE%"=="fresh" (
-    REM Clone inicial com token embutido na URL (bypassa Credential Manager).
-    REM credential.helper= vazio desabilita qualquer helper global para este clone.
+    REM Clone inicial (repo publico, sem token)
     if not exist "%USERPROFILE%\Documents" mkdir "%USERPROFILE%\Documents"
     cd /d "%USERPROFILE%\Documents"
-    git -c credential.helper= clone "%REPO_URL_AUTH%" "classify-legal-doc-llm"
+    git clone "%REPO_URL%" "classify-legal-doc-llm"
     if errorlevel 1 (
         echo.
         echo ERRO: Falha ao clonar repositorio.
-        echo.
-        echo Possiveis causas:
-        echo   - Sem conexao com a internet
-        echo   - Token de acesso invalido ou expirado
-        echo   - Token sem permissao de leitura no repositorio
+        echo Verifique sua conexao com a internet e tente novamente.
         echo.
         pause
         exit /b 1
     )
-
-    REM Configurar o repositorio clonado para usar o token em pulls futuros.
-    cd /d "%INSTALL_DIR%"
-    git remote set-url origin "%REPO_URL_AUTH%"
-
     echo   Repositorio clonado. OK.
 ) else (
     REM Atualizar (tanto repair quanto update fazem pull)
     cd /d "%INSTALL_DIR%"
-    REM Garantir que a URL esta com o token atualizado
-    git remote set-url origin "%REPO_URL_AUTH%"
     git pull
     if errorlevel 1 (
         echo.
